@@ -112,7 +112,7 @@ def analisar_e_operar():
         sequencia_sem_ambas = all(not j["ambas"] for j in ultimos_3)
         assertividade = calcular_assertividade_liga(jogos)
         
-        if sequencia_sem_ambas and assertividade >= 52:
+        if sequencia_sem_ambas e assertividade >= 45:
             horarios = calcular_proximos_horarios(liga_key)
             horarios_str = " | ".join(horarios)
             

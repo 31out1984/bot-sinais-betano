@@ -233,28 +233,21 @@ def verificar_resultado_real(liga, horarios):
 
 # ------------------------------------------------------------------
 # LOOP PRINCIPAL
-# ------------------------------------------------------------------
 def monitorar_jogos():
-    print("==========================================", flush=True)
-    print("ROBÔ MESTRE DOS GREENS - CORRIGIDO", flush=True)
-    print("==========================================", flush=True)
-
     ciclo_ligas = itertools.cycle(LIGAS_MONITORADAS)
-
+    
     while True:
         try:
             liga_atual = next(ciclo_ligas)
-
+            
+            # Envia o sinal com a tendência
             horarios = enviar_sinal(liga_atual)
-            print(f"[+] Sinal enviado ({liga_atual}): {horarios}", flush=True)
-
-            verificar_resultado_real(liga_atual, horarios)
-
-            print("[+] Aguardando 5 minutos para o próximo sinal...", flush=True)
+            
+            # Aguarda 5 minutos para enviar o próximo sinal
             time.sleep(300)
-
+            
         except Exception as e:
-            print(f"[-] Erro recuperado: {e}", flush=True)
+            print(f"[-] Erro na execução: {e}")
             time.sleep(10)
 
 if __name__ == "__main__":

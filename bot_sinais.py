@@ -1,3 +1,5 @@
+import cloudscraper
+import requests
 import os
 import time
 import json

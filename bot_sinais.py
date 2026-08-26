@@ -1,6 +1,8 @@
 import os
 import time
-import requests
+import json
+import urllib.request
+import urllib.parse
 from datetime import datetime, timezone, timedelta
 
 # Configurações do Telegram
@@ -15,28 +17,41 @@ LIGAS = {
     "Copa América": {"id": "copa", "offset": 2}
 }
 
-# Armazenamento em memória dos resultados
-historico_jogos = {liga: [] for liga in LIGAS}
 sinais_ativos = []
 
 def enviar_telegram(mensagem):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": mensagem, "parse_mode": "HTML", "disable_web_page_preview": True}
+    payload = json.dumps({
+        "chat_id": CHAT_ID,
+        "text": mensagem,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
+    }).encode("utf-8")
+    
+    headers = {"Content-Type": "application/json"}
     try:
-        requests.post(url, json=payload, timeout=10)
+        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as response:
+            pass
     except Exception as e:
-        print(f"Erro ao enviar Telegram: {e}")
+        print(f"Erro ao enviar Telegram: {e}", flush=True)
 
 def buscar_resultados_betano(liga_key):
-    """Busca os últimos resultados da liga via API"""
-    # Endpoint de simulação da API de resultados Betano
     url = f"https://br.betano.com/api/virtuals/results/{LIGAS[liga_key]['id']}"
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        r = requests.get(url, timeout=5)
-        if r.status_code == 200:
-            dados = r.json()
-            # Retorna lista de jogos com placares [home, away]
-            return [{"home": j["homeScore"], "away": j["awayScore"], "ambas": j["homeScore"] > 0 and j["awayScore"] > 0} for j in dados.get("games", [])]
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=5) as response:
+            if response.status == 200:
+                dados = json.loads(response.read().decode("utf-8"))
+                return [
+                    {
+                        "home": j.get("homeScore", 0),
+                        "away": j.get("awayScore", 0),
+                        "ambas": j.get("homeScore", 0) > 0 and j.get("awayScore", 0) > 0
+                    }
+                    for j in dados.get("games", [])
+                ]
     except Exception:
         pass
     return []
@@ -67,11 +82,8 @@ def analisar_e_operar():
         if len(jogos) < 5:
             continue
         
-        # Regra 1: Verificar se os últimos 3 jogos NÃO bateram Ambas Marcam
         ultimos_3 = jogos[:3]
         sequencia_sem_ambas = all(not j["ambas"] for j in ultimos_3)
-        
-        # Regra 2: Assertividade da liga precisa estar acima de 52%
         assertividade = calcular_assertividade_liga(jogos)
         
         if sequencia_sem_ambas and assertividade >= 52:
@@ -90,7 +102,6 @@ def analisar_e_operar():
             )
             enviar_telegram(msg)
             
-            # Registra o sinal para acompanhamento de GREEN/RED
             sinais_ativos.append({
                 "liga": liga_key,
                 "horarios": horarios,
@@ -129,7 +140,7 @@ def verificar_green_red():
                 sinais_ativos.remove(sinal)
 
 if __name__ == "__main__":
-    print("Bot Analítico Betano iniciado...")
+    print("Bot Analítico Betano iniciado...", flush=True)
     while True:
         analisar_e_operar()
         verificar_green_red()

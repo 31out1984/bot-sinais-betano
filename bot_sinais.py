@@ -57,15 +57,18 @@ def enviar_telegram(mensagem):
 def buscar_resultados_betano(liga_key):
     target_url = f"https://br.betano.com/api/virtuals/results/{LIGAS[liga_key]['id']}"
     
-    # Rotação de IP residencial via ScraperAPI para passar 100% no 403
+    # URL atualizada explicitamente para HTTPS e com parâmetros de renderização
+    scraper_endpoint = "https://api.scraperapi.com"
     payload = {
         'api_key': SCRAPER_API_KEY,
         'url': target_url,
-        'keep_headers': 'true'
+        'keep_headers': 'true',
+        'render': 'false'  # Retorna a resposta da API diretamente sem carregar JS (muito mais rápido)
     }
 
     try:
-        response = requests.get('http://api.scraperapi.com', params=payload, timeout=25)
+        # Aumentado o timeout da conexão para 35s
+        response = requests.get(scraper_endpoint, params=payload, timeout=35)
         if response.status_code == 200:
             dados = response.json()
             jogos = []

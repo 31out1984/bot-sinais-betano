@@ -20,6 +20,12 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-type", "text/plain")
         self.end_headers()
 
+def iniciar_servidor_web():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), SimpleHTTPRequestHandler)
+    print(f"Servidor Web ativo na porta {port}", flush=True)
+    server.serve_forever()
+
 # --- CONFIGURAÇÕES DO TELEGRAM ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "SEU_TOKEN_AQUI")
 CHAT_ID = os.environ.get("CHAT_ID", "SEU_CHAT_ID_AQUI")
@@ -99,7 +105,6 @@ def analisar_e_operar():
         if len(jogos) < 5:
             continue
         
-        # Evita mandar sinal duplo na mesma liga se já houver um sinal em andamento
         if any(s["liga"] == liga_key for s in sinais_ativos):
             continue
 
@@ -123,7 +128,6 @@ def analisar_e_operar():
             )
             enviar_telegram(msg)
             
-            # Salva o ID do último jogo atual para monitorar os novos jogos que entrarem
             ultimo_id_conhecido = jogos[0]["id"] if jogos else None
             
             sinais_ativos.append({
@@ -141,7 +145,6 @@ def verificar_green_red():
         
         jogo_mais_recente = jogos[0]
         
-        # Se um novo jogo finalizou desde que o sinal foi enviado
         if jogo_mais_recente["id"] != sinal["ultimo_id"]:
             sinal["ultimo_id"] = jogo_mais_recente["id"]
             sinal["tiro_atual"] += 1

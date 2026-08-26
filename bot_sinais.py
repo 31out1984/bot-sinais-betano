@@ -2,7 +2,8 @@ import os
 import time
 import json
 import threading
-import requests
+import urllib.request
+import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timezone, timedelta
 
@@ -40,14 +41,18 @@ sinais_ativos = []
 
 def enviar_telegram(mensagem):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
+    payload = json.dumps({
         "chat_id": CHAT_ID,
         "text": mensagem,
         "parse_mode": "HTML",
         "disable_web_page_preview": True
-    }
+    }).encode("utf-8")
+    
+    headers = {"Content-Type": "application/json"}
     try:
-        requests.post(url, json=payload, timeout=10)
+        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as response:
+            pass
     except Exception as e:
         print(f"Erro no Telegram: {e}", flush=True)
 
@@ -58,25 +63,34 @@ def buscar_resultados_betano(liga_key):
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
         "Referer": "https://br.betano.com/virtuals/",
-        "Origin": "https://br.betano.com"
+        "Origin": "https://br.betano.com",
+        "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin"
     }
     try:
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            dados = response.json()
-            jogos = []
-            for j in dados.get("games", []):
-                home = j.get("homeScore", 0)
-                away = j.get("awayScore", 0)
-                jogos.append({
-                    "id": j.get("id"),
-                    "home": home,
-                    "away": away,
-                    "ambas": home > 0 and away > 0
-                })
-            return jogos
-        else:
-            print(f"Erro API ({liga_key}): Status {response.status_code}", flush=True)
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as response:
+            if response.status == 200:
+                dados = json.loads(response.read().decode("utf-8"))
+                jogos = []
+                for j in dados.get("games", []):
+                    home = j.get("homeScore", 0)
+                    away = j.get("awayScore", 0)
+                    jogos.append({
+                        "id": j.get("id"),
+                        "home": home,
+                        "away": away,
+                        "ambas": home > 0 and away > 0
+                    })
+                return jogos
+            else:
+                print(f"Erro API ({liga_key}): Status {response.status}", flush=True)
+    except urllib.error.HTTPError as e:
+        print(f"Erro HTTP ({liga_key}): {e.code}", flush=True)
     except Exception as e:
         print(f"Erro ao buscar API ({liga_key}): {e}", flush=True)
     return []
@@ -114,6 +128,7 @@ def analisar_e_operar():
         sequencia_sem_ambas = all(not j["ambas"] for j in ultimos_3)
         assertividade = calcular_assertividade_liga(jogos)
         
+        # Filtro ajustado: 3 jogos sem ambas e assertividade da liga >= 40%
         if sequencia_sem_ambas and assertividade >= 40:
             horarios = calcular_proximos_horarios(liga_key)
             horarios_str = " | ".join(horarios)

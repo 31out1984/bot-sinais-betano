@@ -58,10 +58,14 @@ def enviar_telegram(mensagem):
 
 def buscar_resultados_betano(liga_key):
     url = f"https://br.betano.com/api/virtuals/results/{LIGAS[liga_key]['id']}"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+    }
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=5) as response:
+        with urllib.request.urlopen(req, timeout=8) as response:
             if response.status == 200:
                 dados = json.loads(response.read().decode("utf-8"))
                 jogos = []
@@ -75,8 +79,8 @@ def buscar_resultados_betano(liga_key):
                         "ambas": home > 0 and away > 0
                     })
                 return jogos
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Erro ao buscar API ({liga_key}): {e}", flush=True)
     return []
 
 def calcular_assertividade_liga(jogos):
@@ -102,7 +106,7 @@ def calcular_proximos_horarios(liga_key):
 def analisar_e_operar():
     for liga_key in LIGAS:
         jogos = buscar_resultados_betano(liga_key)
-        if len(jogos) < 5:
+        if len(jogos) < 3:
             continue
         
         if any(s["liga"] == liga_key for s in sinais_ativos):
@@ -112,7 +116,8 @@ def analisar_e_operar():
         sequencia_sem_ambas = all(not j["ambas"] for j in ultimos_3)
         assertividade = calcular_assertividade_liga(jogos)
         
-        if sequencia_sem_ambas e assertividade >= 45:
+        # Filtro ajustado: 3 jogos sem ambas e assertividade da liga >= 40%
+        if sequencia_sem_ambas and assertividade >= 40:
             horarios = calcular_proximos_horarios(liga_key)
             horarios_str = " | ".join(horarios)
             
@@ -136,6 +141,7 @@ def analisar_e_operar():
                 "ultimo_id": ultimo_id_conhecido,
                 "tiro_atual": 0
             })
+            print(f"Sinal disparado para {liga_key}!", flush=True)
 
 def verificar_green_red():
     for sinal in sinais_ativos[:]:

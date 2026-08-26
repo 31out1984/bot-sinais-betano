@@ -1,12 +1,28 @@
 import os
 import time
 import json
+import threading
 import urllib.request
 import urllib.parse
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timezone, timedelta
 
-# Configurações do Telegram
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8505709973:AAE_RvUEyNxXk2MB9LcxWP8jYRTeSG3PKl4")
+# --- SERVIDOR WEB SIMPLES PARA EVITAR PORT TIMEOUT NO RENDER ---
+class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Bot Analitico Betano - Online")
+
+def iniciar_servidor_web():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), SimpleHTTPRequestHandler)
+    print(f"Servidor Web ativo na porta {port}", flush=True)
+    server.serve_forever()
+
+# --- CONFIGURAÇÕES DO TELEGRAM ---
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "SEU_TOKEN_AQUI")
 CHAT_ID = os.environ.get("CHAT_ID", "SEU_CHAT_ID_AQUI")
 LINK_BETANO = "https://www.betano.com"
 
@@ -140,6 +156,10 @@ def verificar_green_red():
                 sinais_ativos.remove(sinal)
 
 if __name__ == "__main__":
+    # Inicia o servidor Web em segundo plano para o Render reconhecer a porta
+    t = threading.Thread(target=iniciar_servidor_web, daemon=True)
+    t.start()
+
     print("Bot Analítico Betano iniciado...", flush=True)
     while True:
         analisar_e_operar()

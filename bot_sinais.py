@@ -15,13 +15,23 @@ def run_server():
     server.serve_forever()
 
 # Inicia o servidor em segundo plano
-threading.Thread(target=run_server, daemon=True).start(
-import time
-import json
-import ssl
-import urllib.request
-import itertools
-from datetime import datetime, timedelta, timezone
+import os
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import threading
+
+class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot esta rodando!")
+
+def run_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
+    server.serve_forever()
+
+# ATENÇÃO PARA O FECHAMENTO DOS PARÊNTESES NO FINAL:
+threading.Thread(target=run_server, daemon=True).start()
 
 # ------------------------------------------------------------------
 # CONFIGURAÇÕES TELEGRAM

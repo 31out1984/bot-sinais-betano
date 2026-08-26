@@ -1,11 +1,8 @@
-import cloudscraper
-import requests
 import os
 import time
 import json
 import threading
-import urllib.request
-import urllib.parse
+import cloudscraper
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timezone, timedelta
 
@@ -41,53 +38,56 @@ LIGAS = {
 
 sinais_ativos = []
 
+# Instância do CloudScraper para burlar a Cloudflare
+scraper = cloudscraper.create_scraper(
+    browser={
+        'browser': 'chrome',
+        'platform': 'windows',
+        'desktop': True
+    }
+)
+
 def enviar_telegram(mensagem):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = json.dumps({
+    payload = {
         "chat_id": CHAT_ID,
         "text": mensagem,
         "parse_mode": "HTML",
         "disable_web_page_preview": True
-    }).encode("utf-8")
-    
-    headers = {"Content-Type": "application/json"}
+    }
     try:
-        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=10) as response:
-            pass
+        scraper.post(url, json=payload, timeout=10)
     except Exception as e:
         print(f"Erro no Telegram: {e}", flush=True)
 
 def buscar_resultados_betano(liga_key):
-    target_url = f"https://br.betano.com/api/virtuals/results/{LIGAS[liga_key]['id']}"
-    proxy_url = f"https://api.allorigins.win/get?url={urllib.parse.quote(target_url)}"
-    
+    url = f"https://br.betano.com/api/virtuals/results/{LIGAS[liga_key]['id']}"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8",
+        "Referer": "https://br.betano.com/virtuals/",
+        "Origin": "https://br.betano.com"
     }
     try:
-        req = urllib.request.Request(proxy_url, headers=headers)
-        with urllib.request.urlopen(req, timeout=12) as response:
-            if response.status == 200:
-                raw_data = json.loads(response.read().decode("utf-8"))
-                contents = raw_data.get("contents", "{}")
-                dados = json.loads(contents)
-                
-                jogos = []
-                for j in dados.get("games", []):
-                    home = j.get("homeScore", 0)
-                    away = j.get("awayScore", 0)
-                    jogos.append({
-                        "id": j.get("id"),
-                        "home": home,
-                        "away": away,
-                        "ambas": home > 0 and away > 0
-                    })
-                return jogos
-            else:
-                print(f"Erro Proxy ({liga_key}): Status {response.status}", flush=True)
+        response = scraper.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            dados = response.json()
+            jogos = []
+            for j in dados.get("games", []):
+                home = j.get("homeScore", 0)
+                away = j.get("awayScore", 0)
+                jogos.append({
+                    "id": j.get("id"),
+                    "home": home,
+                    "away": away,
+                    "ambas": home > 0 and away > 0
+                })
+            return jogos
+        else:
+            print(f"Erro Betano ({liga_key}): Status {response.status_code}", flush=True)
     except Exception as e:
-        print(f"Erro ao buscar via Proxy ({liga_key}): {e}", flush=True)
+        print(f"Erro na requisição ({liga_key}): {e}", flush=True)
     return []
 
 def calcular_assertividade_liga(jogos):

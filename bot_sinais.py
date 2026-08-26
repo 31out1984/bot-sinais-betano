@@ -2,7 +2,7 @@ import os
 import time
 import json
 import threading
-import cloudscraper
+import requests
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timezone, timedelta
 
@@ -25,9 +25,12 @@ def iniciar_servidor_web():
     print(f"Servidor Web ativo na porta {port}", flush=True)
     server.serve_forever()
 
-# --- CONFIGURAÇÕES DO TELEGRAM ---
+# --- CONFIGURAÇÕES ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8505709973:AAE_RvUEyNxXk2MB9LcxWP8jYRTeSG3PKl4")
 CHAT_ID = os.environ.get("CHAT_ID", "SEU_CHAT_ID_AQUI")
+# Insira sua chave gratuita do ScraperAPI abaixo ou configure nas Environment Variables do Render
+SCRAPER_API_KEY = os.environ.get("SCRAPER_API_KEY", "SUA_API_KEY_DO_SCRAPERAPI_AQUI")
+
 LINK_BETANO = "https://www.betano.com"
 
 LIGAS = {
@@ -38,15 +41,6 @@ LIGAS = {
 
 sinais_ativos = []
 
-# Instância do CloudScraper para burlar a Cloudflare
-scraper = cloudscraper.create_scraper(
-    browser={
-        'browser': 'chrome',
-        'platform': 'windows',
-        'desktop': True
-    }
-)
-
 def enviar_telegram(mensagem):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
@@ -56,21 +50,22 @@ def enviar_telegram(mensagem):
         "disable_web_page_preview": True
     }
     try:
-        scraper.post(url, json=payload, timeout=10)
+        requests.post(url, json=payload, timeout=10)
     except Exception as e:
         print(f"Erro no Telegram: {e}", flush=True)
 
 def buscar_resultados_betano(liga_key):
-    url = f"https://br.betano.com/api/virtuals/results/{LIGAS[liga_key]['id']}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8",
-        "Referer": "https://br.betano.com/virtuals/",
-        "Origin": "https://br.betano.com"
+    target_url = f"https://br.betano.com/api/virtuals/results/{LIGAS[liga_key]['id']}"
+    
+    # Rotação de IP residencial via ScraperAPI para passar 100% no 403
+    payload = {
+        'api_key': SCRAPER_API_KEY,
+        'url': target_url,
+        'keep_headers': 'true'
     }
+
     try:
-        response = scraper.get(url, headers=headers, timeout=15)
+        response = requests.get('http://api.scraperapi.com', params=payload, timeout=25)
         if response.status_code == 200:
             dados = response.json()
             jogos = []

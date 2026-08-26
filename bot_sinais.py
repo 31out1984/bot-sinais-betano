@@ -7,7 +7,7 @@ import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timezone, timedelta
 
-# --- SERVIDOR WEB SIMPLES PARA EVITAR PORT TIMEOUT NO RENDER ---
+# --- SERVIDOR WEB SIMPLES PARA O RENDER ---
 class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -26,7 +26,6 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "SEU_TOKEN_AQUI")
 CHAT_ID = os.environ.get("CHAT_ID", "SEU_CHAT_ID_AQUI")
 LINK_BETANO = "https://www.betano.com"
 
-# Ligas e seus IDs no Futebol Virtual da Betano
 LIGAS = {
     "Euro Copa": {"id": "euro", "offset": 0},
     "Clássicos": {"id": "classico", "offset": 1},
@@ -50,7 +49,7 @@ def enviar_telegram(mensagem):
         with urllib.request.urlopen(req, timeout=10) as response:
             pass
     except Exception as e:
-        print(f"Erro ao enviar Telegram: {e}", flush=True)
+        print(f"Erro no Telegram: {e}", flush=True)
 
 def buscar_resultados_betano(liga_key):
     url = f"https://br.betano.com/api/virtuals/results/{LIGAS[liga_key]['id']}"
@@ -60,14 +59,17 @@ def buscar_resultados_betano(liga_key):
         with urllib.request.urlopen(req, timeout=5) as response:
             if response.status == 200:
                 dados = json.loads(response.read().decode("utf-8"))
-                return [
-                    {
-                        "home": j.get("homeScore", 0),
-                        "away": j.get("awayScore", 0),
-                        "ambas": j.get("homeScore", 0) > 0 and j.get("awayScore", 0) > 0
-                    }
-                    for j in dados.get("games", [])
-                ]
+                jogos = []
+                for j in dados.get("games", []):
+                    home = j.get("homeScore", 0)
+                    away = j.get("awayScore", 0)
+                    jogos.append({
+                        "id": j.get("id"),
+                        "home": home,
+                        "away": away,
+                        "ambas": home > 0 and away > 0
+                    })
+                return jogos
     except Exception:
         pass
     return []
@@ -98,6 +100,10 @@ def analisar_e_operar():
         if len(jogos) < 5:
             continue
         
+        # Evita mandar sinal duplo na mesma liga se já houver um sinal em andamento
+        if any(s["liga"] == liga_key for s in sinais_ativos):
+            continue
+
         ultimos_3 = jogos[:3]
         sequencia_sem_ambas = all(not j["ambas"] for j in ultimos_3)
         assertividade = calcular_assertividade_liga(jogos)
@@ -118,9 +124,13 @@ def analisar_e_operar():
             )
             enviar_telegram(msg)
             
+            # Salva o ID do último jogo atual para monitorar os novos jogos que entrarem
+            ultimo_id_conhecido = jogos[0]["id"] if jogos else None
+            
             sinais_ativos.append({
                 "liga": liga_key,
                 "horarios": horarios,
+                "ultimo_id": ultimo_id_conhecido,
                 "tiro_atual": 0
             })
 
@@ -130,22 +140,26 @@ def verificar_green_red():
         if not jogos:
             continue
         
-        ultimo_jogo = jogos[0]
-        if ultimo_jogo["ambas"]:
-            tiro_txt = "1º TIRO (SEM GALE)" if sinal["tiro_atual"] == 0 else f"{sinal['tiro_atual'] + 1}º TIRO (GALE {sinal['tiro_atual']})"
-            msg_green = (
-                f"<b>BINGO! GREEN CONFIRMADO! ✅🎯</b>\n\n"
-                f"🏟️ <b>LIGA:</b> {sinal['liga']}\n"
-                f"🎯 <b>ENTRADA:</b> AMBAS MARCAM (SIM)\n"
-                f"⚽ <b>PLACAR REAL:</b> {ultimo_jogo['home']} x {ultimo_jogo['away']}\n"
-                f"🔥 <b>RESULTADO:</b> Batemos no {tiro_txt}!\n\n"
-                f"💰 <i>Lucro no bolso!</i>"
-            )
-            enviar_telegram(msg_green)
-            sinais_ativos.remove(sinal)
-        else:
+        jogo_mais_recente = jogos[0]
+        
+        # Se um novo jogo finalizou desde que o sinal foi enviado
+        if jogo_mais_recente["id"] != sinal["ultimo_id"]:
+            sinal["ultimo_id"] = jogo_mais_recente["id"]
             sinal["tiro_atual"] += 1
-            if sinal["tiro_atual"] >= 3:
+            
+            if jogo_mais_recente["ambas"]:
+                tiro_txt = "1º TIRO (SEM GALE)" if sinal["tiro_atual"] == 1 else f"{sinal['tiro_atual']}º TIRO (GALE {sinal['tiro_atual'] - 1})"
+                msg_green = (
+                    f"<b>BINGO! GREEN CONFIRMADO! ✅🎯</b>\n\n"
+                    f"🏟️ <b>LIGA:</b> {sinal['liga']}\n"
+                    f"🎯 <b>ENTRADA:</b> AMBAS MARCAM (SIM)\n"
+                    f"⚽ <b>PLACAR REAL:</b> {jogo_mais_recente['home']} x {jogo_mais_recente['away']}\n"
+                    f"🔥 <b>RESULTADO:</b> Batemos no {tiro_txt}!\n\n"
+                    f"💰 <i>Lucro no bolso!</i>"
+                )
+                enviar_telegram(msg_green)
+                sinais_ativos.remove(sinal)
+            elif sinal["tiro_atual"] >= 3:
                 msg_red = (
                     f"<b>❌ RED CONFIRMADO (SINAL FINALIZADO) ❌</b>\n\n"
                     f"🏟️ <b>LIGA:</b> {sinal['liga']}\n"
@@ -156,7 +170,6 @@ def verificar_green_red():
                 sinais_ativos.remove(sinal)
 
 if __name__ == "__main__":
-    # Inicia o servidor Web em segundo plano para o Render reconhecer a porta
     t = threading.Thread(target=iniciar_servidor_web, daemon=True)
     t.start()
 
@@ -164,4 +177,4 @@ if __name__ == "__main__":
     while True:
         analisar_e_operar()
         verificar_green_red()
-        time.sleep(60)
+        time.sleep(30)

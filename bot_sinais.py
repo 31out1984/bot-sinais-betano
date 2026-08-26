@@ -57,25 +57,20 @@ def enviar_telegram(mensagem):
         print(f"Erro no Telegram: {e}", flush=True)
 
 def buscar_resultados_betano(liga_key):
-    url = f"https://br.betano.com/api/virtuals/results/{LIGAS[liga_key]['id']}"
+    target_url = f"https://br.betano.com/api/virtuals/results/{LIGAS[liga_key]['id']}"
+    proxy_url = f"https://api.allorigins.win/get?url={urllib.parse.quote(target_url)}"
+    
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Referer": "https://br.betano.com/virtuals/",
-        "Origin": "https://br.betano.com",
-        "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"Windows"',
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-origin"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
     try:
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=10) as response:
+        req = urllib.request.Request(proxy_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=12) as response:
             if response.status == 200:
-                dados = json.loads(response.read().decode("utf-8"))
+                raw_data = json.loads(response.read().decode("utf-8"))
+                contents = raw_data.get("contents", "{}")
+                dados = json.loads(contents)
+                
                 jogos = []
                 for j in dados.get("games", []):
                     home = j.get("homeScore", 0)
@@ -88,11 +83,9 @@ def buscar_resultados_betano(liga_key):
                     })
                 return jogos
             else:
-                print(f"Erro API ({liga_key}): Status {response.status}", flush=True)
-    except urllib.error.HTTPError as e:
-        print(f"Erro HTTP ({liga_key}): {e.code}", flush=True)
+                print(f"Erro Proxy ({liga_key}): Status {response.status}", flush=True)
     except Exception as e:
-        print(f"Erro ao buscar API ({liga_key}): {e}", flush=True)
+        print(f"Erro ao buscar via Proxy ({liga_key}): {e}", flush=True)
     return []
 
 def calcular_assertividade_liga(jogos):
@@ -128,7 +121,6 @@ def analisar_e_operar():
         sequencia_sem_ambas = all(not j["ambas"] for j in ultimos_3)
         assertividade = calcular_assertividade_liga(jogos)
         
-        # Filtro ajustado: 3 jogos sem ambas e assertividade da liga >= 40%
         if sequencia_sem_ambas and assertividade >= 40:
             horarios = calcular_proximos_horarios(liga_key)
             horarios_str = " | ".join(horarios)

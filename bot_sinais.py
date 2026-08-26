@@ -1,254 +1,136 @@
 import os
 import time
-import json
-import ssl
-import itertools
-import urllib.request
-import urllib.parse
-import urllib.error
+import requests
 from datetime import datetime, timezone, timedelta
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import threading
 
-# Servidor para enganar a checagem de porta do Render
-class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot esta rodando!")
+# Configurações do Telegram
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8505709973:AAE_RvUEyNxXk2MB9LcxWP8jYRTeSG3PKl4")
+CHAT_ID = os.environ.get("CHAT_ID", "SEU_CHAT_ID_AQUI")
+LINK_BETANO = "https://www.betano.com"
 
-def run_server():
-    port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
-    server.serve_forever()
+# Ligas e seus IDs no Futebol Virtual da Betano
+LIGAS = {
+    "Euro Copa": {"id": "euro", "offset": 0},
+    "Clássicos": {"id": "classico", "offset": 1},
+    "Copa América": {"id": "copa", "offset": 2}
+}
 
-# Inicia o servidor em segundo plano
-import os
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import threading
+# Armazenamento em memória dos resultados
+historico_jogos = {liga: [] for liga in LIGAS}
+sinais_ativos = []
 
-class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot esta rodando!")
-
-def run_server():
-    port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
-    server.serve_forever()
-
-# ATENÇÃO PARA O FECHAMENTO DOS PARÊNTESES NO FINAL:
-threading.Thread(target=run_server, daemon=True).start()
-
-# ------------------------------------------------------------------
-# CONFIGURAÇÕES TELEGRAM
-# ------------------------------------------------------------------
-TELEGRAM_TOKEN = "8505709973:AAE_RvUEyNxXk2MB9LcxWP8jYRTeSG3PKl4"
-CHAT_ID = "-1001767631044"  # Seu CHAT_ID ou @canal
-LINK_BETANO = "https://www.betano.br/sport/futebol-virtual/"
-
-LIGAS_MONITORADAS = [
-    "Clássico das Américas",
-    "Copa América",
-    "Euro"
-]
-
-def enviar_mensagem(texto):
+def enviar_telegram(mensagem):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": texto,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True
-    }
-
-    headers = {'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0'}
-    data = json.dumps(payload).encode('utf-8')
-
-    contexto_ssl = ssl.create_default_context()
-    contexto_ssl.check_hostname = False
-    contexto_ssl.verify_mode = ssl.CERT_NONE
-
-    req = urllib.request.Request(url, data=data, headers=headers)
-
+    payload = {"chat_id": CHAT_ID, "text": mensagem, "parse_mode": "HTML", "disable_web_page_preview": True}
     try:
-        with urllib.request.urlopen(req, context=contexto_ssl, timeout=10) as response:
-            res_data = json.loads(response.read().decode('utf-8'))
-            if res_data.get("ok"):
-                print("[+] Mensagem enviada no Telegram!", flush=True)
-            else:
-                print("[-] Erro do Telegram:", res_data, flush=True)
+        requests.post(url, json=payload, timeout=10)
     except Exception as e:
-        print("[-] Falha no envio:", e, flush=True)
+        print(f"Erro ao enviar Telegram: {e}")
 
-# ------------------------------------------------------------------
-# CÁLCULO DOS HORÁRIOS DA GRADE (FUSO HORÁRIO DE BRASÍLIA UTC-3)
-# ------------------------------------------------------------------
-def calcular_horarios_grade(liga):
-    # Garante o horário exato de Brasília (UTC-3)
+def buscar_resultados_betano(liga_key):
+    """Busca os últimos resultados da liga via API"""
+    # Endpoint de simulação da API de resultados Betano
+    url = f"https://br.betano.com/api/virtuals/results/{LIGAS[liga_key]['id']}"
+    try:
+        r = requests.get(url, timeout=5)
+        if r.status_code == 200:
+            dados = r.json()
+            # Retorna lista de jogos com placares [home, away]
+            return [{"home": j["homeScore"], "away": j["awayScore"], "ambas": j["homeScore"] > 0 and j["awayScore"] > 0} for j in dados.get("games", [])]
+    except Exception:
+        pass
+    return []
+
+def calcular_assertividade_liga(jogos):
+    if not jogos:
+        return 0
+    ambas_sim = sum(1 for j in jogos if j["ambas"])
+    return int((ambas_sim / len(jogos)) * 100)
+
+def calcular_proximos_horarios(liga_key):
     fuso_brasil = timezone(timedelta(hours=-3))
-    agora_br = datetime.now(timezone.utc).astimezone(fuso_brasil)
-
-    # Dá 2 minutos de margem a partir de agora em Brasília
-    base = agora_br + timedelta(minutes=2)
-    minuto_atual = base.minute
-
-    if "Clássico" in liga or "Classico" in liga:
-        offset = 1  # :01, :04, :07, :10, :13, :16, :19...
-    elif "Copa América" in liga or "Copa America" in liga:
-        offset = 2  # :02, :05, :08, :11, :14, :17, :20...
-    else:  # Euro
-        offset = 0  # :00, :03, :06, :09, :12, :15, :18...
-
-    resto = (minuto_atual - offset) % 3
-    if resto != 0:
-        minuto_proximo = minuto_atual + (3 - resto)
-    else:
-        minuto_proximo = minuto_atual
-
-    primeiro_jogo = base.replace(minute=0, second=0, microsecond=0) + timedelta(minutes=minuto_proximo)
-
-    t1 = primeiro_jogo.strftime("%H:%M")
-    t2 = (primeiro_jogo + timedelta(minutes=3)).strftime("%H:%M")
-    t3 = (primeiro_jogo + timedelta(minutes=6)).strftime("%H:%M")
-
+    agora = datetime.now(timezone.utc).astimezone(fuso_brasil) + timedelta(minutes=2)
+    offset = LIGAS[liga_key]["offset"]
+    
+    resto = (agora.minute - offset) % 3
+    proximo_minuto = agora.minute if resto == 0 else agora.minute + (3 - resto)
+    base = agora.replace(minute=0, second=0, microsecond=0) + timedelta(minutes=proximo_minuto)
+    
+    t1 = base.strftime("%H:%M")
+    t2 = (base + timedelta(minutes=3)).strftime("%H:%M")
+    t3 = (base + timedelta(minutes=6)).strftime("%H:%M")
     return [t1, t2, t3]
 
-# ------------------------------------------------------------------
-# MENSAGENS DE SINAL, GREEN E RED
-# ------------------------------------------------------------------
-def enviar_sinal(liga):
-    horarios = calcular_horarios_grade(liga)
-    horarios_str = " | ".join(horarios)
-
-    mensagem = f"""<b>⚽ SINAL CONFIRMADO - BETANO VIRTUAL ⚽</b>
-
-🏟 <b>LIGA:</b> {liga}
-🎯 <b>ENTRADA:</b> AMBAS MARCAM (SIM)
-⏰ <b>HORÁRIOS:</b> {horarios_str}
-🛡 <b>PROTEÇÃO:</b> Até 3 Tiros (Gale 2)
-
-👉 <a href="{LINK_BETANO}">CLIQUE AQUI PARA APOSTAR NA BETANO</a>
-
-⚠️ <i>Siga sua gestão de banca!</i>"""
-
-    enviar_mensagem(mensagem)
-    return horarios
-
-def enviar_green(liga, tiro, placar):
-    if tiro == 1:
-        detalhe = "1º TIRO (SEM GALE)"
-    else:
-        detalhe = f"{tiro}º TIRO (GALE {tiro-1})"
-
-    mensagem = f"""<b>BINGO! GREEN CONFIRMADO! ✅🎯</b>
-
-🏟 <b>LIGA:</b> {liga}
-🎯 <b>ENTRADA:</b> AMBAS MARCAM (SIM)
-⚽ <b>PLACAR REAL:</b> {placar}
-🔥 <b>RESULTADO:</b> Batemos no {detalhe}!
-
-💰 <i>Lucro no bolso! Parabéns aos que pegaram!</i>
-👉 <a href="{LINK_BETANO}">APOSTAR NA PRÓXIMA</a>"""
-    enviar_mensagem(mensagem)
-
-def enviar_red(liga):
-    mensagem = f"""<b>❌ RED CONFIRMADO (SINAL FINALIZADO) ❌</b>
-
-🏟 <b>LIGA:</b> {liga}
-🎯 <b>ENTRADA:</b> AMBAS MARCAM (SIM)
-
-⚠️ <i>Mantenha a gestão de banca! Respeite o stop-loss e aguarde a próxima oportunidade.</i>"""
-    enviar_mensagem(mensagem)
-
-# ------------------------------------------------------------------
-# CONSULTA DE RESULTADOS NA API DA BETANO
-# ------------------------------------------------------------------
-def buscar_placar_real(liga, horario_alvo):
-    url_results = "https://www.betano.br/api/virtuals/results"
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Accept": "application/json"
-    }
-
-    contexto_ssl = ssl.create_default_context()
-    contexto_ssl.check_hostname = False
-    contexto_ssl.verify_mode = ssl.CERT_NONE
-
-    req = urllib.request.Request(url_results, headers=headers)
-
-    try:
-        with urllib.request.urlopen(req, context=contexto_ssl, timeout=10) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
-
-            for evento in data.get("events", []):
-                horario_evento = evento.get("time")
-                nome_liga = evento.get("leagueName", "")
-
-                if horario_evento == horario_alvo and liga.lower() in nome_liga.lower():
-                    gols_casa = int(evento.get("homeScore", 0))
-                    gols_fora = int(evento.get("awayScore", 0))
-
-                    ambas_marcaram = (gols_casa > 0) and (gols_fora > 0)
-                    placar = f"{gols_casa} x {gols_fora}"
-
-                    return ambas_marcaram, placar
-    except Exception as e:
-        print(f"[-] Erro ao buscar resultado na Betano ({horario_alvo}): {e}", flush=True)
-
-    return None, None
-
-# ------------------------------------------------------------------
-# VERIFICAÇÃO REAL COM REPETIÇÃO
-# ------------------------------------------------------------------
-def verificar_resultado_real(liga, horarios):
-    for i, hor in enumerate(horarios, start=1):
-        print(f"[*] Aguardando término do jogo das {hor} (Tiro {i})...", flush=True)
-
-        # Espera o tempo aproximado do jogo
-        time.sleep(160)
-
-        # Faz até 4 tentativas com intervalo de 15 segundos para dar tempo de atualizar na Betano
-        ambas_marcaram = False
-        placar_final = "N/D"
-
-        for tentativa in range(4):
-            ambas, placar = buscar_placar_real(liga, hor)
-            if ambas is not None:
-                ambas_marcaram = ambas
-                placar_final = placar
-                break
-            time.sleep(15)
-
-        print(f"[>] Jogo {hor} | Placar: {placar_final} | Ambas Marcam: {ambas_marcaram}", flush=True)
-
-        if ambas_marcaram:
-            enviar_green(liga, i, placar_final)
-            return True
-
-    enviar_red(liga)
-    return False
-
-# ------------------------------------------------------------------
-# LOOP PRINCIPAL
-def monitorar_jogos():
-    ciclo_ligas = itertools.cycle(LIGAS_MONITORADAS)
-    
-    while True:
-        try:
-            liga_atual = next(ciclo_ligas)
+def analisar_e_operar():
+    for liga_key in LIGAS:
+        jogos = buscar_resultados_betano(liga_key)
+        if len(jogos) < 5:
+            continue
+        
+        # Regra 1: Verificar se os últimos 3 jogos NÃO bateram Ambas Marcam
+        ultimos_3 = jogos[:3]
+        sequencia_sem_ambas = all(not j["ambas"] for j in ultimos_3)
+        
+        # Regra 2: Assertividade da liga precisa estar acima de 52%
+        assertividade = calcular_assertividade_liga(jogos)
+        
+        if sequencia_sem_ambas and assertividade >= 52:
+            horarios = calcular_proximos_horarios(liga_key)
+            horarios_str = " | ".join(horarios)
             
-            # Envia o sinal com a tendência
-            horarios = enviar_sinal(liga_atual)
+            msg = (
+                f"⚽ <b>SINAL CONFIRMADO - BETANO VIRTUAL</b> ⚽\n\n"
+                f"🏟️ <b>LIGA:</b> {liga_key}\n"
+                f"🎯 <b>ENTRADA:</b> AMBAS MARCAM (SIM)\n"
+                f"⏰ <b>HORÁRIOS:</b> {horarios_str}\n"
+                f"🛡️ <b>PROTEÇÃO:</b> Até 2 Gales (3 Tiros)\n"
+                f"📊 <b>ASSERTIVIDADE DA LIGA:</b> {assertividade}%\n\n"
+                f"👉 <a href='{LINK_BETANO}'>CLIQUE AQUI PARA APOSTAR</a>\n"
+                f"⚠️ <i>Siga sua gestão de banca!</i>"
+            )
+            enviar_telegram(msg)
             
-            # Aguarda 5 minutos para enviar o próximo sinal
-            time.sleep(300)
-            
-        except Exception as e:
-            print(f"[-] Erro na execução: {e}")
-            time.sleep(10)
+            # Registra o sinal para acompanhamento de GREEN/RED
+            sinais_ativos.append({
+                "liga": liga_key,
+                "horarios": horarios,
+                "tiro_atual": 0
+            })
+
+def verificar_green_red():
+    for sinal in sinais_ativos[:]:
+        jogos = buscar_resultados_betano(sinal["liga"])
+        if not jogos:
+            continue
+        
+        ultimo_jogo = jogos[0]
+        if ultimo_jogo["ambas"]:
+            tiro_txt = "1º TIRO (SEM GALE)" if sinal["tiro_atual"] == 0 else f"{sinal['tiro_atual'] + 1}º TIRO (GALE {sinal['tiro_atual']})"
+            msg_green = (
+                f"<b>BINGO! GREEN CONFIRMADO! ✅🎯</b>\n\n"
+                f"🏟️ <b>LIGA:</b> {sinal['liga']}\n"
+                f"🎯 <b>ENTRADA:</b> AMBAS MARCAM (SIM)\n"
+                f"⚽ <b>PLACAR REAL:</b> {ultimo_jogo['home']} x {ultimo_jogo['away']}\n"
+                f"🔥 <b>RESULTADO:</b> Batemos no {tiro_txt}!\n\n"
+                f"💰 <i>Lucro no bolso!</i>"
+            )
+            enviar_telegram(msg_green)
+            sinais_ativos.remove(sinal)
+        else:
+            sinal["tiro_atual"] += 1
+            if sinal["tiro_atual"] >= 3:
+                msg_red = (
+                    f"<b>❌ RED CONFIRMADO (SINAL FINALIZADO) ❌</b>\n\n"
+                    f"🏟️ <b>LIGA:</b> {sinal['liga']}\n"
+                    f"🎯 <b>ENTRADA:</b> AMBAS MARCAM (SIM)\n\n"
+                    f"⚠️ <i>Respeite o stop-loss e aguarde a próxima oportunidade.</i>"
+                )
+                enviar_telegram(msg_red)
+                sinais_ativos.remove(sinal)
 
 if __name__ == "__main__":
-    monitorar_jogos()
+    print("Bot Analítico Betano iniciado...")
+    while True:
+        analisar_e_operar()
+        verificar_green_red()
+        time.sleep(60)

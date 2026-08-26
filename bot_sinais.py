@@ -2,7 +2,8 @@ import os
 import time
 import json
 import threading
-import requests
+import urllib.request
+import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timezone, timedelta
 
@@ -28,9 +29,6 @@ def iniciar_servidor_web():
 # --- CONFIGURAÇÕES ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8505709973:AAE_RvUEyNxXk2MB9LcxWP8jYRTeSG3PKl4")
 CHAT_ID = os.environ.get("CHAT_ID", "SEU_CHAT_ID_AQUI")
-# Insira sua chave gratuita do ScraperAPI abaixo ou configure nas Environment Variables do Render
-SCRAPER_API_KEY = os.environ.get("SCRAPER_API_KEY", "SUA_API_KEY_DO_SCRAPERAPI_AQUI")
-
 LINK_BETANO = "https://www.betano.com"
 
 LIGAS = {
@@ -43,49 +41,50 @@ sinais_ativos = []
 
 def enviar_telegram(mensagem):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
+    payload = json.dumps({
         "chat_id": CHAT_ID,
         "text": mensagem,
         "parse_mode": "HTML",
         "disable_web_page_preview": True
-    }
+    }).encode("utf-8")
+    
+    headers = {"Content-Type": "application/json"}
     try:
-        requests.post(url, json=payload, timeout=10)
+        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as response:
+            pass
     except Exception as e:
-        print(f"Erro no Telegram: {e}", flush=True)
+        print(f"Erro Telegram: {e}", flush=True)
 
 def buscar_resultados_betano(liga_key):
     target_url = f"https://br.betano.com/api/virtuals/results/{LIGAS[liga_key]['id']}"
+    # Utiliza gateway leve com resposta imediata
+    proxy_url = f"https://corsproxy.io/?{urllib.parse.quote(target_url)}"
     
-    # URL atualizada explicitamente para HTTPS e com parâmetros de renderização
-    scraper_endpoint = "https://api.scraperapi.com"
-    payload = {
-        'api_key': SCRAPER_API_KEY,
-        'url': target_url,
-        'keep_headers': 'true',
-        'render': 'false'  # Retorna a resposta da API diretamente sem carregar JS (muito mais rápido)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0 Safari/537.36"
     }
 
     try:
-        # Aumentado o timeout da conexão para 35s
-        response = requests.get(scraper_endpoint, params=payload, timeout=35)
-        if response.status_code == 200:
-            dados = response.json()
-            jogos = []
-            for j in dados.get("games", []):
-                home = j.get("homeScore", 0)
-                away = j.get("awayScore", 0)
-                jogos.append({
-                    "id": j.get("id"),
-                    "home": home,
-                    "away": away,
-                    "ambas": home > 0 and away > 0
-                })
-            return jogos
-        else:
-            print(f"Erro Betano ({liga_key}): Status {response.status_code}", flush=True)
-    except Exception as e:
-        print(f"Erro na requisição ({liga_key}): {e}", flush=True)
+        req = urllib.request.Request(proxy_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as response:
+            if response.status == 200:
+                raw_data = response.read().decode("utf-8")
+                dados = json.loads(raw_data)
+                
+                jogos = []
+                for j in dados.get("games", []):
+                    home = j.get("homeScore", 0)
+                    away = j.get("awayScore", 0)
+                    jogos.append({
+                        "id": j.get("id"),
+                        "home": home,
+                        "away": away,
+                        "ambas": home > 0 and away > 0
+                    })
+                return jogos
+    except Exception:
+        pass  # Evita poluir o log em falhas temporárias de conexão
     return []
 
 def calcular_assertividade_liga(jogos):
@@ -189,4 +188,5 @@ if __name__ == "__main__":
     while True:
         analisar_e_operar()
         verificar_green_red()
-        time.sleep(30)
+        # Consulta a cada 180 segundos (3 minutos) para acompanhar o ritmo dos jogos virtuais
+        time.sleep(180)

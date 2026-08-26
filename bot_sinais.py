@@ -3,6 +3,9 @@ import time
 import json
 import ssl
 import itertools
+import urllib.request
+import urllib.parse
+import urllib.error
 from datetime import datetime, timezone, timedelta
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading

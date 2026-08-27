@@ -28,7 +28,7 @@ def iniciar_servidor_web():
 
 # --- CONFIGURAÇÕES ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8505709973:AAE_RvUEyNxXk2MB9LcxWP8jYRTeSG3PKl4")
-CHAT_ID = os.environ.get("CHAT_ID", "SEU_CHAT_ID_AQUI")
+CHAT_ID = os.environ.get("CHAT_ID", "-1001767631044")
 LINK_BETANO = "https://www.betano.com"
 
 LIGAS = {
